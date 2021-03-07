@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mediawiki.fullname" . }}-app
+  labels:
+    {{- include "mediawiki.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mediawiki.selectorLabels" . | nindent 6 }}
+      app: {{ .Chart.Name }}-app
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "mediawiki.selectorLabels" . | nindent 8 }}
+        app: {{ .Chart.Name }}-app
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mediawiki.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}-{{ .Values.app.phpfpm.namesuffix }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.app.phpfpm.image.repository }}:{{ .Values.app.phpfpm.image.tag }}"
+          imagePullPolicy: {{ .Values.app.phpfpm.image.pullPolicy }}
+          command:
+            - "php-fpm"
+          args:
+            - "-F"
+          ports:
+            - name: fcgi
+              containerPort: 9000
+              protocol: TCP
+          #TODO: Add livenessProbe and readinessProbe for php-fpm
+          #livenessProbe:
+          #  httpGet:
+          #    path: /
+          #    port: http
+          #readinessProbe:
+          #  httpGet:
+          #    path: /
+          #    port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Chart.Name }}-config-volume
+              mountPath: /etc/php-fpm.conf
+              subPath: php-fpm.conf
+              readOnly: true
+            - name: {{ .Chart.Name }}-app-volume
+              mountPath: /usr/share/nginx/html/LocalSettings.php
+              subPath: LocalSettings.php
+        - name: {{ .Chart.Name }}-{{ .Values.app.nginx.namesuffix }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.app.nginx.image.repository }}:{{ .Values.app.nginx.image.tag }}"
+          imagePullPolicy: {{ .Values.app.nginx.image.pullPolicy }}
+          command:
+            - "nginx"
+          args:
+            - "-g"
+            - "daemon off;"
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /ping.html
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /ping.html
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Chart.Name }}-config-volume
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+      initContainers:
+        - name: {{ .Chart.Name }}-init
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.app.phpfpm.image.repository }}:{{ .Values.app.phpfpm.image.tag }}"
+          imagePullPolicy: {{ .Values.app.phpfpm.image.pullPolicy }}
+          env:
+            - name: DB_NAME
+              value: "{{ .Values.db.dbname }}"
+            - name: DB_SERVER
+              value: {{ include "mediawiki.fullname" . }}-db
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mediawiki.fullname" . }}-secrets
+                  key: dbrootpw
+            - name: DB_USER
+              value: "{{ .Values.db.dbuser }}"
+            - name: USER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mediawiki.fullname" . }}-secrets
+                  key: dbuserpw
+            - name: ADMIN_USERNAME
+              value: "{{ .Values.wiki.adminuser }}"
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mediawiki.fullname" . }}-secrets
+                  key: wikiadminpw
+            - name: WIKI_NAME
+              value: "{{ .Values.wiki.name }}"
+          command:
+            - "sh"
+          args:
+            - "-c"
+            - |
+              set -e
+              [ -f /app/LocalSettings.php ] && exit 0
+              php /usr/share/nginx/html/maintenance/install.php --dbname=$DB_NAME --dbserver=$DB_SERVER --installdbuser=root --installdbpass=$DB_PASSWORD \
+                --dbuser=$DB_USER --dbpass=$USER_DB_PASSWORD --server='' --scriptpath='' --lang=en --pass=$ADMIN_PASSWORD "$WIKI_NAME" $ADMIN_USERNAME
+              cp -f /usr/share/nginx/html/LocalSettings.php /app/
+          volumeMounts:
+            - name: {{ .Chart.Name }}-app-volume
+              mountPath: /app
+      volumes:
+        - name: {{ .Chart.Name }}-config-volume
+          configMap:
+            name: {{ .Chart.Name }}-config
+        - name: {{ .Chart.Name }}-app-volume
+          persistentVolumeClaim:
+            claimName: {{ include "mediawiki.fullname" . }}-app-pvc
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

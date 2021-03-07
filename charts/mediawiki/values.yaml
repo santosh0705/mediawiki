@@ -2,13 +2,54 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+wiki:
+  name: "Media Wiki"
+  adminuser: "Admin"
+  # adminpw: "Admin123"
+  # Pass the secrets from the commandline
+  # --set wiki.adminpw=Admin123
+
 replicaCount: 1
 
-image:
-  repository: santosh0705/mediawiki
-  pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+app:
+  phpfpm:
+    namesuffix: phpfpm
+    port: "9000"
+    image:
+      registry: docker.io
+      repository: santosh0705/mediawiki
+      pullPolicy: IfNotPresent
+      tag: "1.34.4"
+  nginx:
+    namesuffix: nginx
+    port: "80"
+    image:
+      registry: docker.io
+      repository: santosh0705/mediawiki
+      pullPolicy: IfNotPresent
+      tag: "1.34.4"
+
+db:
+  namesuffix: db
+  port: "3306"
+  dbname: mediawiki
+  dbuser: mediawiki
+  image:
+    registry: docker.io
+    repository: mariadb
+    pullPolicy: IfNotPresent
+    tag: "10.5.9"
+  # rootpw: root123
+  # dbuserpw: mediawiki123
+  # Pass the secrets from the commandline
+  # --set db.rootpw=root123 --set db.dbuserpw=mediawiki123
+
+persistence:
+  accessMode: ReadWriteOnce
+  storageClassName: ""
+  size:
+    app: 10Mi
+    db: 1Gi
 
 imagePullSecrets: []
 nameOverride: ""
@@ -38,7 +79,6 @@ securityContext: {}
 
 service:
   type: ClusterIP
-  port: 80
 
 ingress:
   enabled: false

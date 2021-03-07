@@ -1,16 +1,15 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "mediawiki.fullname" . }}
+  name: {{ include "mediawiki.fullname" . }}-db
   labels:
     {{- include "mediawiki.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
-  replicas: {{ .Values.replicaCount }}
-  {{- end }}
+  replicas: 1
   selector:
     matchLabels:
       {{- include "mediawiki.selectorLabels" . | nindent 6 }}
+      app: {{ .Chart.Name }}-db
   template:
     metadata:
       {{- with .Values.podAnnotations }}
@@ -19,6 +18,7 @@ spec:
       {{- end }}
       labels:
         {{- include "mediawiki.selectorLabels" . | nindent 8 }}
+        app: {{ .Chart.Name }}-db
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -28,15 +28,21 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}-phpfpm
+        - name: {{ .Chart.Name }}-{{ .Values.db.namesuffix }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+          imagePullPolicy: {{ .Values.db.image.pullPolicy }}
           ports:
-            - name: fcgi
-              containerPort: 9000
+            - name: db
+              containerPort: {{ .Values.db.port }}
               protocol: TCP
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "mediawiki.fullname" . }}-secrets
+                  key: dbrootpw
           #TODO: Add livenessProbe and readinessProbe for php-fpm
           #livenessProbe:
           #  httpGet:
@@ -48,26 +54,13 @@ spec:
           #    port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-        - name: {{ .Chart.Name }}-nginx
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
-          #TODO: To be enabled later
-          #livenessProbe:
-          #  httpGet:
-          #    path: /
-          #    port: http
-          #readinessProbe:
-          #  httpGet:
-          #    path: /
-          #    port: http
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .Chart.Name }}-db-volume
+              mountPath: /var/lib/mysql
+      volumes:
+        - name: {{ .Chart.Name }}-db-volume
+          persistentVolumeClaim:
+            claimName: {{ include "mediawiki.fullname" . }}-db-pvc
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
